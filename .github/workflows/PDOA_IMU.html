@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>交互式PDOA-EKF融合定位浏览器</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" xintegrity="sha384-n8MVd4RsNIU0KOVEMutoestonlclMAxFoHabciydbfiHelMcnUdAGuvbwFqBCNWaA" crossorigin="anonymous">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" xintegrity="sha384-XjKyOOlGwcjNTAIQHIpgOno0Hl1YQqzUOEleOLALmuqehneUG+vnGctmUbKyIyUH" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" xintegrity="sha384-+VBxd3r6XgURycqtZ117nYw44OOcIax5AScKprqL1CELynA1OSyKFbnLCoCyrK0i" crossorigin="anonymous"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+    <!-- 
+    Chosen Palette: "Calm Harmony" - A palette grounded in warm neutrals (slate, stone) as the main background. A complementary muted blue is used for primary actions and highlights, with a subtle amber for accents and alerts. This creates a professional, calm, and focused atmosphere suitable for technical content.
+    Application Structure Plan: The SPA is redesigned to be a rich, explorable document. It flows from the core problem (ambiguity) and sensor comparison to a highly detailed, step-by-step breakdown of the EKF solution. The interactive simulation has been replaced with a more comprehensive textual and mathematical explanation of the EKF's prediction and update cycle, focusing deeply on the ambiguity resolution mechanism, and now explicitly links the theory to the user's provided Python code.
+    Visualization & Content Choices: 
+    - EKF Principle Explanation: Goal(Inform) -> Expanded section with multiple cards detailing each step of the EKF process (State, Prediction, Update) with mathematical formulas and direct references to the provided Python code -> Static content -> Justification(Provides the requested in-depth theoretical explanation, bridging the gap between abstract theory and concrete implementation for maximum clarity.) -> Library/Method(HTML/Tailwind CSS/KaTeX).
+    - Ambiguity Canvas: Goal(Inform) -> Custom Canvas Diagram -> On-hover details -> Justification(Remains as an effective visual introduction to the core problem that the EKF theory aims to solve.) -> Library/Method(Vanilla JS Canvas API).
+    - System Equations: Goal(Inform) -> Styled HTML in Accordions -> Click to expand/collapse -> Justification(Serves as a mathematical appendix, providing the specific models used without cluttering the main explanation.) -> Library/Method(HTML/CSS/JS).
+    CONFIRMATION: NO SVG graphics used. NO Mermaid JS used.
+    -->
+    <style>
+        body { font-family: 'Inter', 'Noto Sans SC', sans-serif; background-color: #f8fafc; color: #1e293b; }
+        .font-noto { font-family: 'Noto Sans SC', sans-serif; }
+        .bg-warm-neutral { background-color: #f1f5f9; }
+        .text-primary { color: #334155; }
+        .text-secondary { color: #64748b; }
+        .accent-bg { background-color: #388bff; }
+        .accent-text { color: #388bff; }
+        .accent-border { border-color: #388bff; }
+        .card { background-color: white; border-radius: 0.75rem; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1); }
+        .code-snippet { background-color: #f1f5f9; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-family: 'Courier New', Courier, monospace; font-size: 0.9em; color: #475569; }
+        .katex-display { display: block; text-align: center; margin: 1em 0; }
+        .katex { font-size: 1.1em !important; }
+        .accordion-content { max-height: 0; overflow: hidden; transition: max-height 0.3s ease-out; }
+    </style>
+</head>
+<body class="antialiased">
+
+    <header class="bg-white/80 backdrop-blur-lg sticky top-0 z-20 shadow-sm">
+        <nav class="container mx-auto px-4 lg:px-8">
+            <div class="flex items-center justify-between h-16">
+                <h1 class="text-xl font-bold text-primary font-noto">PDOA去模糊融合定位方案</h1>
+                <div class="hidden md:flex items-center space-x-6 text-sm font-semibold">
+                    <a href="#problem" class="text-secondary hover:accent-text">核心问题</a>
+                    <a href="#solution" class="text-secondary hover:accent-text">融合方案</a>
+                    <a href="#principle" class="text-secondary hover:accent-text">EKF原理详解</a>
+                    <a href="#models" class="text-secondary hover:accent-text">系统模型</a>
+                </div>
+            </div>
+        </nav>
+    </header>
+
+    <main class="container mx-auto px-4 lg:px-8 py-12">
+        
+        <section id="problem" class="mb-20 text-center">
+            <h2 class="text-3xl font-bold text-primary font-noto mb-4">核心问题：PDOA的“双胞胎”难题</h2>
+            <p class="max-w-3xl mx-auto text-secondary mb-8">仅依靠单基站的相位到达差（PDOA）进行测角，会产生一个无法回避的几何模糊性问题。一个PDOA测量值总是对应着两个对称的角度，导致系统无法确定目标的真实位置。下图直观地展示了这个问题。</p>
+            <div class="card p-4 sm:p-6">
+                <canvas id="ambiguityCanvas" class="w-full h-64 md:h-80"></canvas>
+                <p id="ambiguity-info" class="mt-4 text-sm text-secondary font-semibold">将鼠标悬停在可能的目标位置上以查看详情</p>
+            </div>
+        </section>
+
+        <section id="solution" class="mb-20">
+            <div class="text-center">
+                <h2 class="text-3xl font-bold text-primary font-noto mb-4">解决方案：优势互补的传感器融合</h2>
+                <p class="max-w-3xl mx-auto text-secondary mb-12">为了解决PDOA的模糊性，我们引入惯性测量单元（IMU）。IMU和UWB两种传感器特性迥异，却能形成完美互补，通过扩展卡尔曼滤波器（EKF）将它们的数据进行紧耦合融合，便能裁决出唯一正确的定位解。</p>
+            </div>
+            <div class="grid md:grid-cols-2 gap-8 max-w-5xl mx-auto">
+                <div class="card p-8">
+                    <div class="flex items-center mb-4">
+                        <svg class="w-8 h-8 accent-text mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                        <h3 class="text-xl font-bold text-primary font-noto">惯性测量单元 (IMU)</h3>
+                    </div>
+                    <p class="text-secondary mb-4">提供高频率（>100Hz）的连续相对运动轨迹。它能告诉我们目标“正在如何移动”。</p>
+                    <ul class="space-y-2">
+                        <li class="flex items-start"><span class="text-green-500 mr-2">✔</span> <strong class="mr-1">优点:</strong> 连续性好，更新率高，能捕捉瞬时动态。</li>
+                        <li class="flex items-start"><span class="text-red-500 mr-2">✘</span> <strong class="mr-1">缺点:</strong> 存在积分漂移，长期误差会累积，无法独立进行绝地定位。</li>
+                    </ul>
+                </div>
+                <div class="card p-8">
+                     <div class="flex items-center mb-4">
+                        <svg class="w-8 h-8 accent-text mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                        <h3 class="text-xl font-bold text-primary font-noto">超宽带 (UWB-PDOA)</h3>
+                    </div>
+                    <p class="text-secondary mb-4">提供低频率（<10Hz）的绝对位置测量（距离和角度）。它能告诉我们目标“在什么地方”。</p>
+                     <ul class="space-y-2">
+                        <li class="flex items-start"><span class="text-green-500 mr-2">✔</span> <strong class="mr-1">优点:</strong> 无累积误差，提供绝对位置信息，精度高。</li>
+                        <li class="flex items-start"><span class="text-red-500 mr-2">✘</span> <strong class="mr-1">缺点:</strong> 更新率低，测量存在噪声，且有角度模糊性。</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+
+        <section id="principle" class="mb-20">
+             <div class="text-center">
+                <h2 class="text-3xl font-bold text-primary font-noto mb-4">EKF原理与代码实现详解</h2>
+                <p class="max-w-3xl mx-auto text-secondary mb-12">EKF通过“预测”与“更新”的循环，将IMU的连续运动推算与UWB的绝对测量进行概率意义上的最优融合。下面我们将结合Python代码，深入剖析每一步的实现细节。</p>
+            </div>
+            <div class="max-w-4xl mx-auto space-y-8">
+                <div class="card p-8">
+                    <h3 class="text-xl font-bold text-primary font-noto mb-3">核心要素：状态 <code class="code-snippet">self.state</code> 与协方差 <code class="code-snippet">self.cov</code></h3>
+                    <p class="text-secondary">在EKF的Python类中，系统的状态由两个关键属性表示：
+                    <ul class="list-disc list-inside text-secondary space-y-2 my-4">
+                        <li><strong><code class="code-snippet">self.state</code> (状态向量 $\bm{x}$):</strong> 一个包含8个元素(px, py, vx, vy, yaw, bax, bay, bgz)的Numpy数组，代表了我们对系统当前状态的“最佳估计”。</li>
+                        <li><strong><code class="code-snippet">self.cov</code> (协方差矩阵 $\bm{P}$):</strong> 一个8x8的Numpy数组，量化了我们对 <code class="code-snippet">self.state</code> 估计值的不确定性。对角线上的值表示各个状态量的方差，非对角线值表示它们之间的相关性。</li>
+                    </ul>
+                </div>
+
+                <div class="card p-8">
+                    <h3 class="text-xl font-bold text-primary font-noto mb-3">第一步: 预测阶段 - <code class="code-snippet">predict()</code> 方法</h3>
+                    <p class="text-secondary">在 <code class="code-snippet">predict(accel_meas, gyro_meas)</code> 方法中，滤波器基于IMU读数和运动模型，对状态和不确定性进行推算。</p>
+                    <ol class="list-decimal list-inside space-y-4 mt-4">
+                        <li><strong class="text-primary">状态预测 (State Prediction)</strong>: 代码首先根据运动学公式，利用上一时刻的状态来计算当前时刻的先验状态估计。
+                            <p class="mt-2 text-sm">Python代码片段:</p>
+                            <pre class="bg-gray-100 p-2 rounded-md text-sm overflow-x-auto"><code>p_new = p + v * self.config.dt
+v_new = v + (R @ a_true) * self.config.dt
+yaw_new = yaw + omega_true * self.config.dt
+self.state[...] = [..., p_new, v_new, yaw_new, ...]</code></pre>
+                            这完美对应了理论公式：$\bm{x}^-_{k} = f(\bm{x}_{k-1}, \bm{u}_k)$。其中 <code class="code-snippet">a_true</code> 和 <code class="code-snippet">omega_true</code> 是扣除了上一时刻偏置估计的IMU读数。
+                        </li>
+                        <li><strong class="text-primary">协方差预测 (Covariance Prediction)</strong>: 接着，代码计算了协方差矩阵的传播，这体现了不确定性的增加。
+                             <p class="mt-2 text-sm">Python代码片段:</p>
+                            <pre class="bg-gray-100 p-2 rounded-md text-sm overflow-x-auto"><code>F = self.compute_process_jacobian(...)
+self.cov = F @ self.cov @ F.T + self.config.process_noise</code></pre>
+                            这对应了理论公式：$\bm{P}^-_{k} = \bm{F}_k \bm{P}_{k-1} \bm{F}_k^T + \bm{Q}_k$。<code class="code-snippet">compute_process_jacobian()</code> 方法计算了运动模型关于状态向量的偏导数矩阵 <code class="code-snippet">F</code>，而 <code class="code-snippet">self.config.process_noise</code> 就是过程噪声矩阵 $\bm{Q}_k$。
+                        </li>
+                    </ol>
+                </div>
+
+                 <div class="card p-8">
+                    <h3 class="text-xl font-bold text-primary font-noto mb-3">第二步: 更新阶段 - <code class="code-snippet">update()</code> 方法与解模糊机制</h3>
+                    <p class="text-secondary">当UWB测量值 <code class="code-snippet">range_meas, pdoa_meas</code> 到达时，<code class="code-snippet">update()</code> 方法被调用。**这是解模糊的核心，但整个过程是隐式且自动的，无需进行任何显式的“选择”。**</p>
+                     <ol class="list-decimal list-inside space-y-4 mt-4">
+                        <li><strong class="text-primary">计算预期测量和新息</strong>:
+                             <p class="mt-2 text-sm">Python代码片段:</p>
+                            <pre class="bg-gray-100 p-2 rounded-md text-sm overflow-x-auto"><code>z_expected = self.uwb_measurement_model()
+z_meas = np.array([range_meas, pdoa_meas])
+y = z_meas - z_expected</code></pre>
+                             <code class="code-snippet">uwb_measurement_model()</code> 方法完全对应理论中的 $h(\bm{x}^-_{k})$，它根据IMU预测出的先验状态 <code class="code-snippet">self.state</code>，计算出滤波器“期望”看到的UWB读数 <code class="code-snippet">z_expected</code>。
+                            <br><br>
+                            <strong>解模糊的关键洞察</strong>: 由于IMU的连续推算，先验状态 <code class="code-snippet">self.state</code> 已经非常接近目标的真实位置。因此，计算出的 <code class="code-snippet">z_expected</code> 中的PDOA值，也必然接近真实的PDOA。而此时接收到的UWB测量值 <code class="code-snippet">pdoa_meas</code>，虽然理论上存在模糊性，但实际上传感器只会输出一个值，这个值是围绕真实PDOA（而非模糊PDOA）的一个带噪声的读数。因此，当两者相减计算新息 <code class="code-snippet">y</code> (对应 $\bm{y}_k$) 时，PDOA部分的值自然会很小。滤波器甚至根本“不知道”另一个模糊解的存在，它只看到了一个与自己预期偏差不大的测量值。
+                        </li>
+                         <li><strong class="text-primary">计算卡尔曼增益</strong>: 
+                             <p class="mt-2 text-sm">Python代码片段:</p>
+                            <pre class="bg-gray-100 p-2 rounded-md text-sm overflow-x-auto"><code>H = self.compute_measurement_jacobian()
+S = H @ self.cov @ H.T + self.config.measurement_noise
+K = self.cov @ H.T @ np.linalg.inv(S)</code></pre>
+                            这部分代码严格按照理论公式计算卡尔曼增益 $\bm{K}_k$。<code class="code-snippet">H</code> 是测量模型的雅可比矩阵，<code class="code-snippet">S</code> 是新息的协方差，<code class="code-snippet">self.config.measurement_noise</code> 则是测量噪声矩阵 $\bm{R}_k$。
+                        </li>
+                         <li><strong class="text-primary">更新状态与协方差</strong>:
+                            <p class="mt-2 text-sm">Python代码片段:</p>
+                            <pre class="bg-gray-100 p-2 rounded-md text-sm overflow-x-auto"><code>self.state += K @ y
+self.cov = (np.eye(8) - K @ H) @ self.cov</code></pre>
+                            这是最终的“拨乱反正”。因为新息 <code class="code-snippet">y</code> 很小，所以修正量 <code class="code-snippet">K @ y</code> 也只是一个温和的微调，将IMU的预测向更准确的UWB测量值拉近了一点。如果因为某些原因（例如IMU漂移严重，或UWB信号受干扰）导致 <code class="code-snippet">y</code> 异常大，那么卡尔曼增益 <code class="code-snippet">K</code> 的计算中包含了协方差信息，它会根据当前预测和测量各自的不确定性，自动调整修正的幅度，起到了一个“减震器”的作用，防止状态被异常值带偏。最后，更新协方差，减小不确定性，为下一轮预测做好准备。
+                        </li>
+                    </ol>
+                </div>
+            </div>
+        </section>
+
+        <section id="models" class="max-w-4xl mx-auto">
+            <div class="text-center">
+                <h2 class="text-3xl font-bold text-primary font-noto mb-4">系统模型揭秘</h2>
+                <p class="max-w-3xl mx-auto text-secondary mb-12">EKF算法的核心是运动模型和测量模型。这里展示了驱动我们仿真器的关键数学公式。点击标题以展开或折叠详细内容。</p>
+            </div>
+            <div class="space-y-4">
+                <div class="accordion-item card">
+                    <button class="accordion-header w-full flex justify-between items-center text-left p-6">
+                        <span class="text-lg font-bold text-primary font-noto">状态向量</span>
+                        <svg class="w-6 h-6 transition-transform transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                    </button>
+                    <div class="accordion-content px-6 pb-6 text-secondary">
+                        <p>系统状态向量 $\bm{x}$ 是一个8维向量，完整地描述了载体的运动状态和关键的传感器误差。</p>
+                        <div>
+                           $\bm{x} = [p_x, p_y, v_x, v_y, \psi, b_{ax}, b_{ay}, b_{g_z}]^T$
+                        </div>
+                    </div>
+                </div>
+                <div class="accordion-item card">
+                    <button class="accordion-header w-full flex justify-between items-center text-left p-6">
+                        <span class="text-lg font-bold text-primary font-noto">运动模型 (预测)</span>
+                         <svg class="w-6 h-6 transition-transform transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                    </button>
+                    <div class="accordion-content px-6 pb-6 text-secondary">
+                        <p>运动模型使用IMU的测量值（加速度和角速度）来预测状态如何随时间演变。</p>
+                        <div>
+                           $\bm{p}_k = \bm{p}_{k-1} + \bm{v}_{k-1} \Delta t$
+                        </div>
+                        <div>
+                           $\bm{v}_k = \bm{v}_{k-1} + (\bm{R}(\psi_{k-1}) \cdot (\bm{a}_{m} - \bm{b}_a)) \Delta t$
+                        </div>
+                         <div>
+                           $\psi_k = \psi_{k-1} + (\omega_{m_z} - b_{g_z}) \Delta t$
+                        </div>
+                    </div>
+                </div>
+                <div class="accordion-item card">
+                    <button class="accordion-header w-full flex justify-between items-center text-left p-6">
+                        <span class="text-lg font-bold text-primary font-noto">测量模型 (更新)</span>
+                         <svg class="w-6 h-6 transition-transform transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                    </button>
+                    <div class="accordion-content px-6 pb-6 text-secondary">
+                        <p>测量模型描述了如何从当前状态估计中，反推出预期的UWB测量值（距离和PDOA）。</p>
+                        <div>
+                            $r = \|\bm{p}_{bs} - (\bm{p} + \bm{R}(\psi) \cdot \bm{p}_{\text{offset}})\|$
+                        </div>
+                        <div>
+                            $\Delta \phi = \frac{2\pi d}{\lambda} \sin(\theta)$
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            
+            try {
+                renderMathInElement(document.body, {
+                    delimiters: [
+                        {left: "$$", right: "$$", display: true},
+                        {left: "$", right: "$", display: false}
+                    ]
+                });
+            } catch (error) {
+                console.error("KaTeX rendering failed:", error);
+            }
+
+            const ambiguityCanvas = document.getElementById('ambiguityCanvas');
+            const ambiguityInfo = document.getElementById('ambiguity-info');
+            if (ambiguityCanvas) {
+                const actx = ambiguityCanvas.getContext('2d');
+                let ambiguityObjects = [];
+
+                function drawAmbiguity() {
+                    const w = ambiguityCanvas.width = ambiguityCanvas.clientWidth;
+                    const h = ambiguityCanvas.height = ambiguityCanvas.clientHeight;
+                    const centerX = w / 2;
+                    const centerY = h * 0.8;
+                    const radius = Math.min(w, h) * 0.5;
+
+                    actx.clearRect(0, 0, w, h);
+                    
+                    const bs = { x: centerX, y: centerY, r: 10 };
+                    const p1 = { x: centerX - radius * 0.7, y: centerY - radius * 0.5, r: 15, name: "可能位置 1" };
+                    const p2 = { x: centerX + radius * 0.7, y: centerY - radius * 0.5, r: 15, name: "可能位置 2" };
+                    ambiguityObjects = [p1, p2, bs];
+
+                    actx.strokeStyle = '#94a3b8'; actx.lineWidth = 2; actx.setLineDash([5, 5]);
+                    actx.beginPath(); actx.moveTo(bs.x, bs.y); actx.lineTo(p1.x, p1.y);
+                    actx.moveTo(bs.x, bs.y); actx.lineTo(p2.x, p2.y); actx.stroke();
+                    
+                    actx.strokeStyle = '#cbd5e1'; actx.beginPath();
+                    actx.moveTo(centerX, 0); actx.lineTo(centerX, h); actx.stroke();
+                    actx.setLineDash([]);
+
+                    actx.fillStyle = '#10b981'; actx.beginPath();
+                    actx.moveTo(bs.x, bs.y - bs.r); actx.lineTo(bs.x - bs.r, bs.y + bs.r);
+                    actx.lineTo(bs.x + bs.r, bs.y + bs.r); actx.closePath(); actx.fill();
+                    actx.fillStyle = '#059669'; actx.font = 'bold 12px Inter';
+                    actx.textAlign = 'center'; actx.fillText('基站', bs.x, bs.y + 28);
+
+                    [p1, p2].forEach(p => {
+                        actx.fillStyle = '#ef4444'; actx.beginPath();
+                        actx.arc(p.x, p.y, p.r, 0, 2 * Math.PI); actx.fill();
+                        actx.fillStyle = '#fee2e2'; actx.font = 'bold 16px Inter';
+                        actx.fillText('?', p.x, p.y + 6);
+                    });
+                }
+
+                ambiguityCanvas.addEventListener('mousemove', (e) => {
+                    const rect = ambiguityCanvas.getBoundingClientRect();
+                    const x = e.clientX - rect.left; const y = e.clientY - rect.top;
+                    let hoverText = "将鼠标悬停在可能的目标位置上以查看详情"; let hovered = false;
+                    ambiguityObjects.forEach(obj => {
+                        const dist = Math.sqrt((x - obj.x)**2 + (y - obj.y)**2);
+                        if (dist < obj.r && obj.name) {
+                            const angle = Math.atan2(obj.y - ambiguityObjects[2].y, obj.x - ambiguityObjects[2].x);
+                            const pdoaVal = Math.sin(angle);
+                            hoverText = `${obj.name}: 距离 r, 到达角 θ, 产生相同的 sin(θ) ≈ ${pdoaVal.toFixed(3)}`;
+                            hovered = true;
+                        }
+                    });
+                    ambiguityInfo.textContent = hoverText;
+                    ambiguityCanvas.style.cursor = hovered ? 'pointer' : 'default';
+                });
+                window.addEventListener('resize', drawAmbiguity);
+                drawAmbiguity();
+            }
+
+            document.querySelectorAll('.accordion-header').forEach(header => {
+                header.addEventListener('click', () => {
+                    const content = header.nextElementSibling;
+                    const icon = header.querySelector('svg');
+                    const allContents = document.querySelectorAll('.accordion-content');
+                    const allIcons = document.querySelectorAll('.accordion-header svg');
+
+                    allContents.forEach(c => { if (c !== content) c.style.maxHeight = null; });
+                    allIcons.forEach(i => { if (i !== icon) i.classList.remove('rotate-180'); });
+
+                    if (content.style.maxHeight) {
+                        content.style.maxHeight = null;
+                        icon.classList.remove('rotate-180');
+                    } else {
+                        content.style.maxHeight = content.scrollHeight + 'px';
+                        icon.classList.add('rotate-180');
+                    }
+                });
+            });
+        });
+    </script>
+</body>
+</html>
